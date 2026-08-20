@@ -36,8 +36,12 @@ traj_{ep_idx}/
             {camera_name}: byte-encoded string representing the video filename of this camera's feed, in the same directory as the h5 file.
         sensor_param/
             {camera_name}/
-                cam2world_gl: (T, 4, 4) array of camera-to-world transformation matrices
-                extrinsic_cv: (T, 3, 4) top 3 rows of cam2world_gl
+                cam2world_cv: (T, 4, 4) camera-to-world transforms, OpenCV frame
+                              (x right, y down, z forward)
+                cam2world_gl: (T, 4, 4) DEPRECATED alias of cam2world_cv, identical
+                              payload; it was never OpenGL-framed
+                extrinsic_cv: (T, 3, 4) world-to-camera, i.e. the top 3 rows of
+                              inv(cam2world_cv) -- NOT of cam2world_cv itself
                 intrinsic_cv: (T, 3, 3) camera intrinsics matrics
     obs_scene: dict, time-invariant scene-specific information
     rewards: (T,) array of floats, per-step reward

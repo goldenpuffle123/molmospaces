@@ -342,7 +342,7 @@ the batched episode dict to an HDF5 file with the layout documented in
 |---|---|---|
 | `qpos`, `qvel` | `traj_{i}/obs/agent/{name}` | from `RobotJointPositionSensor` / `RobotJointVelocitySensor` |
 | `actions/*` | `traj_{i}/actions/{name}` | strips the `actions/` prefix |
-| `sensor_param_{cam}` | `traj_{i}/obs/sensor_param/{cam}/{intrinsic_cv,extrinsic_cv,cam2world_gl}` | one group per camera |
+| `sensor_param_{cam}` | `traj_{i}/obs/sensor_param/{cam}/{intrinsic_cv,extrinsic_cv,cam2world_cv,cam2world_gl}` | one group per camera; `cam2world_gl` is a deprecated alias of `cam2world_cv` (OpenCV frame) |
 | Camera sensors (`{cam}`, `{cam}_depth`) | `traj_{i}/obs/sensor_data/{cam}` | dataset value is the **byte-encoded MP4 filename**, not the frames themselves; the file lives next to the HDF5 |
 | `env_states` | `traj_{i}/env_states/{actors,articulations}` | JSON byte buffer is decoded and re-bucketed |
 | Anything in the `extra_sensor_mapping` allowlist | `traj_{i}/obs/extra/{target_name}` | This is an **explicit allowlist** in `_save_extra_data_from_batched` — see warning below |

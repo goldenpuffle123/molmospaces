@@ -56,8 +56,19 @@ class Camera:
         return False  # by default cameras don't update
 
     def get_pose(self) -> NDArray[np.float32]:
-        """
-        return 4x4 pose
+        """Camera-to-world transform in the OpenCV convention.
+
+        Columns are the camera axes expressed in world coordinates, translation
+        is the camera position, i.e. this maps CAMERA points to WORLD points::
+
+            col0 = +right, col1 = +down (-up), col2 = +forward, col3 = position
+
+        That is the OpenCV / "CV" frame (x right, y down, z forward), which is
+        what ``intrinsic_cv`` in :class:`CameraParameterSensor` assumes: a pixel
+        unprojects as ``x = (u - cx) * z / fx``, ``y = (v - cy) * z / fy``.
+
+        It is NOT the OpenGL frame (x right, y up, z BACKWARD). Consumers that
+        want GL must post-multiply by ``diag(1, -1, -1, 1)``.
         """
         # Validate and normalize camera vectors
         forward_norm = np.linalg.norm(self.forward)
@@ -83,13 +94,15 @@ class Camera:
         # Recompute orthogonal up to ensure proper orthogonal basis
         up = np.cross(right, forward)
 
-        # Create cam2world matrix (standard camera convention)
-        world2cam = np.eye(4)
-        world2cam[:3, 0] = right  # X-axis (right)
-        world2cam[:3, 1] = -up  # Y-axis (up)
-        world2cam[:3, 2] = forward  # Z-axis - camera looks down negative Z
-        world2cam[:3, 3] = self.pos  # Translation
-        return world2cam
+        # cam2world in the OpenCV frame. The local name used to be `world2cam`,
+        # which contradicted both this comment and the docstring above; the maths
+        # is unchanged, only the name and the axis comments are corrected.
+        cam2world_cv = np.eye(4)
+        cam2world_cv[:3, 0] = right  # X-axis: right
+        cam2world_cv[:3, 1] = -up  # Y-axis: DOWN (OpenCV), i.e. -up
+        cam2world_cv[:3, 2] = forward  # Z-axis: FORWARD (OpenCV), not -forward
+        cam2world_cv[:3, 3] = self.pos  # Translation: camera position in world
+        return cam2world_cv
 
 
 class RobotMountedCamera(Camera):

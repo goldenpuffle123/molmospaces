@@ -121,15 +121,19 @@ class CAP_Policy(InferencePolicy):
                 x_cam = -(x - cx) * z_cam / fx
                 y_cam = -(cy - y) * z_cam / fy
                 p_cam = np.array([x_cam, y_cam, z_cam])
+                # The sensor gives cam2world in the OpenCV frame; the unprojection
+                # above is written in the OpenGL frame (negated z and y), so
+                # T_corr converts CV -> GL. Renamed from the deprecated
+                # "cam2world_gl" key; the payload is identical.
                 T_corr = np.eye(4)
                 T_corr[:3, :3] = np.diag([1, -1, -1])
                 if self.use_exo:
                     camera_pose = (
-                        np.array(obs["sensor_param_exo_camera_1"]["cam2world_gl"].copy()) @ T_corr
+                        np.array(obs["sensor_param_exo_camera_1"]["cam2world_cv"].copy()) @ T_corr
                     )
                 else:
                     camera_pose = (
-                        np.array(obs["sensor_param_wrist_camera"]["cam2world_gl"].copy()) @ T_corr
+                        np.array(obs["sensor_param_wrist_camera"]["cam2world_cv"].copy()) @ T_corr
                     )
                 p_world = camera_pose[:3, :3] @ p_cam + camera_pose[:3, 3]
                 self.T_world_object = np.eye(4)

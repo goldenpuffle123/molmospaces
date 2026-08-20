@@ -118,7 +118,17 @@ class SegmentationSensor(Sensor):
 
 
 class CameraParameterSensor(Sensor):
-    """Sensor for camera parameters (intrinsics and extrinsics)."""
+    """Sensor for camera parameters (intrinsics and extrinsics).
+
+    Frame convention, stated once because it is easy to get wrong:
+
+    * ``cam2world_cv`` maps CAMERA points to WORLD points, in the OpenCV frame
+      (x right, y down, z forward) -- the frame ``intrinsic_cv`` assumes.
+    * ``extrinsic_cv`` is its inverse (world -> camera), top 3 rows.
+    * ``cam2world_gl`` is a DEPRECATED alias of ``cam2world_cv``, kept because
+      existing recordings and readers use the key. It was never GL-framed;
+      consumers wanting OpenGL must post-multiply by ``diag(1, -1, -1, 1)``.
+    """
 
     def __init__(
         self,
@@ -135,6 +145,8 @@ class CameraParameterSensor(Sensor):
         observation_space = gyms.Dict(
             {
                 "extrinsic_cv": gyms.Box(low=-np.inf, high=np.inf, shape=(3, 4), dtype=np.float32),
+                "cam2world_cv": gyms.Box(low=-np.inf, high=np.inf, shape=(4, 4), dtype=np.float32),
+                # deprecated alias of cam2world_cv (see class docstring)
                 "cam2world_gl": gyms.Box(low=-np.inf, high=np.inf, shape=(4, 4), dtype=np.float32),
                 "intrinsic_cv": gyms.Box(low=-np.inf, high=np.inf, shape=(3, 3), dtype=np.float32),
             }
@@ -144,10 +156,10 @@ class CameraParameterSensor(Sensor):
     def get_observation(self, env, task, batch_index: int = 0, *args, **kwargs) -> dict:
         """Get camera parameters for a specific environment."""
         camera = env.camera_manager.registry[self.camera_name]
-        world2cam = camera.get_pose()
-        # Create extrinsic_cv (Computer Vision convention - world2cam)
-        extrinsic_cv = np.linalg.inv(world2cam)[:3, :]  # 3x4 matrix
-        cam2world_gl = world2cam
+        # get_pose() returns cam2world in the OpenCV frame (see Camera.get_pose).
+        cam2world_cv = camera.get_pose()
+        # extrinsic_cv is the inverse: world -> camera, top 3 rows.
+        extrinsic_cv = np.linalg.inv(cam2world_cv)[:3, :]  # 3x4 matrix
 
         width, height = self.img_resolution
         fovy_degrees = camera.fov
@@ -162,8 +174,12 @@ class CameraParameterSensor(Sensor):
         )
 
         # Ensure consistent structure and ordering
+        cam2world_list = cam2world_cv.tolist()
         data = {
-            "cam2world_gl": cam2world_gl.tolist(),
+            "cam2world_cv": cam2world_list,
+            # DEPRECATED alias, identical payload. Kept so existing readers and
+            # recordings keep working; prefer cam2world_cv in new code.
+            "cam2world_gl": cam2world_list,
             "extrinsic_cv": extrinsic_cv.tolist(),
             "intrinsic_cv": intrinsic_cv.tolist(),
         }

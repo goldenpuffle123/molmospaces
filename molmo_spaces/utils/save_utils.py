@@ -585,7 +585,8 @@ def save_trajectories(
     │   ├── sensor_param/
     │   │   └── render_camera/
     │   │       ├── extrinsic_cv (T,3,4)
-    │   │       ├── cam2world_gl (T,4,4)
+    │   │       ├── cam2world_cv (T,4,4)
+    │   │       ├── cam2world_gl (T,4,4) - DEPRECATED alias of cam2world_cv
     │   │       └── intrinsic_cv (T,3,3)
     │   └── sensor_data/
     │       └── render_camera/
