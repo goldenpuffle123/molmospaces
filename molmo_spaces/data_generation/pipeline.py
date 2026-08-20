@@ -560,6 +560,18 @@ class ParallelRolloutRunner:
             exp_config.task_sampler_config.max_allowed_sequential_irrecoverable_failures
         )
 
+        # LOUD, because this flag silently changes what the output MEANS. With
+        # it on, samples_per_house counts SUCCESSES: a failed episode is not
+        # saved and is re-rolled (up to max_retries_per_house), so the collected
+        # set is conditioned on success and a success rate cannot be read off it.
+        if getattr(exp_config, "filter_for_successful_trajectories", False):
+            self.logger.warning(
+                "filter_for_successful_trajectories=True: samples_per_house "
+                "counts SUCCESSES, failures are discarded and re-rolled, so the "
+                "saved episodes are conditioned on success -- a success rate "
+                "read from this output is not the policy's success rate."
+            )
+
         # Setup shared state for multiprocessing
         self.counter_lock = mp_context.Lock()
         self.shutdown_event = mp_context.Event()
