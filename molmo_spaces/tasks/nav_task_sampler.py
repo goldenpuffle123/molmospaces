@@ -8,6 +8,7 @@ from molmo_spaces.env.arena.arena_utils import modify_mjmodel_thor_articulated
 from molmo_spaces.env.data_views import MlSpacesObject
 from molmo_spaces.env.env import CPUMujocoEnv
 from molmo_spaces.tasks.nav_task import NavToObjTask
+from molmo_spaces.tasks.segmentation_rig import SegmentationRigMixin
 from molmo_spaces.tasks.task_sampler import (
     BaseMujocoTaskSampler,
 )
@@ -27,10 +28,14 @@ class RolloutFailure(Exception):
     pass
 
 
-class NavToObjTaskSampler(BaseMujocoTaskSampler):
+class NavToObjTaskSampler(SegmentationRigMixin, BaseMujocoTaskSampler):
     """
     Default task sampler for RBY1 navigation to object tasks with house iteration control.
     House order (`house_inds`) and samples per house are provided via config.
+
+    Inherits SegmentationRigMixin because nav success is "the target has at least
+    one pixel in the head camera", which MSAA can satisfy with a blended phantom
+    (see molmo_spaces/tasks/segmentation_rig.py).
     """
 
     def __init__(self, config: "NavToObjBaseConfig") -> None:
