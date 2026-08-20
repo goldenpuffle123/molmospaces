@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 
 import gymnasium.spaces as gyms
 import numpy as np
@@ -1036,6 +1037,96 @@ def get_core_sensors(exp_config):
     # Object tracking sensors
     sensors.append(ObjectImagePointsSensor(exp_config=exp_config))
 
+    return sensors
+
+
+def get_perception_sensors(
+    exp_config,
+    *,
+    cameras: Sequence[str] | None = None,
+    depth: bool = True,
+    segmentation: bool = False,
+    self_mask: bool = False,
+    include_params: bool = True,
+    robot_namespace: str | None = None,
+) -> list[Sensor]:
+    """Posed RGB-D (+ segmentation, + self-occlusion mask) for mapping stacks.
+
+    The bundle a SLAM / occupancy / next-best-view stack needs, and the piece
+    ``get_nav_task_sensors`` is missing: it attaches RGB and camera parameters
+    only, so a mapper driving a nav task has to reach past the observation dict
+    and call ``env.render_depth_frame`` itself.
+
+    Unlike the per-task bundles this is composable and robot-agnostic: it bakes
+    in no robot-name checks and adds only what you ask for.
+
+    FRAME AND UNIT CONVENTIONS, stated because consumers cannot guess them:
+
+    * ``camera_params_{cam}["cam2world_cv"]`` is camera->world in the OpenCV
+      frame (x right, y down, z forward), matching ``intrinsic_cv``.
+    * ``depth_{cam}`` is METRIC z-depth in metres (perpendicular distance to the
+      image plane), NOT ray length, as float32.
+    * ``self_mask_{cam}`` is True where the pixel shows the robot's own body.
+      Those pixels carry no world information and must be dropped, not treated
+      as free or occupied.
+
+    Args:
+        cameras: camera names to cover; None = every camera in the camera config.
+        depth / segmentation / self_mask: which streams to attach.
+        include_params: attach ``CameraParameterSensor`` too. Pass False when
+            composing with a bundle that already provides it (uuids must be
+            unique within a SensorSuite).
+        robot_namespace: override for the self-occlusion mask; None auto-detects
+            from the running robot.
+
+    Returns:
+        A list of sensors, ready to concatenate with another bundle or to return
+        from ``BasePolicy.create_policy_sensors``.
+    """
+    from molmo_spaces.env.sensors_cameras import (
+        CameraParameterSensor,
+        DepthSensor,
+        SegmentationSensor,
+        SelfOcclusionMaskSensor,
+    )
+
+    names = [c.name for c in exp_config.camera_config.cameras] if cameras is None else list(cameras)
+    known = {c.name for c in exp_config.camera_config.cameras}
+    unknown = [n for n in names if n not in known]
+    # Fail loud: a typo'd camera name would otherwise yield a silently empty
+    # observation stream, which looks exactly like a broken sensor.
+    assert not unknown, f"unknown camera(s) {unknown}; camera_config has {sorted(known)}"
+
+    resolution = exp_config.camera_config.img_resolution
+    sensors: list[Sensor] = []
+    for name in names:
+        if include_params:
+            sensors.append(
+                CameraParameterSensor(
+                    camera_name=name,
+                    img_resolution=resolution,
+                    uuid=f"sensor_param_{name}",
+                )
+            )
+        if depth:
+            sensors.append(
+                DepthSensor(camera_name=name, img_resolution=resolution, uuid=f"{name}_depth")
+            )
+        if segmentation:
+            sensors.append(
+                SegmentationSensor(
+                    camera_name=name, img_resolution=resolution, uuid=f"{name}_segmentation"
+                )
+            )
+        if self_mask:
+            sensors.append(
+                SelfOcclusionMaskSensor(
+                    camera_name=name,
+                    img_resolution=resolution,
+                    robot_namespace=robot_namespace,
+                    uuid=f"{name}_self_mask",
+                )
+            )
     return sensors
 
 

@@ -101,20 +101,85 @@ class SegmentationSensor(Sensor):
         super().__init__(uuid=uuid, observation_space=observation_space)
 
     def get_observation(self, env, task, batch_index: int = 0, *args, **kwargs) -> np.ndarray:
-        """Get segmentation image from environment rendering."""
+        """Get segmentation image from environment rendering.
+
+        Renders per camera via ``render_segmentation_frame``, mirroring
+        DepthSensor. The previous implementation called ``env.segmentation_frame``
+        as if it were a method, but it is a read-only property backed by
+        ``_segmentation_frame``, which is initialised to None and never assigned
+        -- so both branches failed and this sensor always returned zeros.
+        """
         # Use camera-specific frame access for multi-camera support
-        if hasattr(env, "segmentation_frame") and callable(env.segmentation_frame):
-            frame = env.segmentation_frame(self.camera_name)
+        if hasattr(env, "render_segmentation_frame") and callable(env.render_segmentation_frame):
+            frame = env.render_segmentation_frame(self.camera_name)
             if frame is not None:
                 return frame
 
-        # Fallback to default camera for backward compatibility
-        if hasattr(env, "segmentation_frame") and env.segmentation_frame is not None:
+        # Fallback to the last rendered frame, if the env exposes one
+        if getattr(env, "segmentation_frame", None) is not None:
             return env.segmentation_frame
 
         # Return zero segmentation if no rendering available
         width, height = self.img_resolution
         return np.zeros((height, width, 1), dtype=np.uint8)
+
+
+class SelfOcclusionMaskSensor(Sensor):
+    """bool[H, W]: pixels showing the robot's OWN bodies, in one camera.
+
+    Why a mapping stack needs this. A wide, downward-pitched head camera sees a
+    large slice of its own robot (RBY1's 139 deg lens pitched ~33 deg down sees
+    torso and arms). Those depth returns are real, but they say nothing about the
+    world -- integrate them into an occupancy map and the robot writes itself in
+    as an obstacle at its own standing height, then refuses to move.
+
+    Pixels flagged here must be DROPPED by the consumer: not marked free, not
+    marked occupied. This sensor only reports them; it does not alter depth.
+    """
+
+    def __init__(
+        self,
+        camera_name: str = "camera",
+        img_resolution: tuple[int, int] = (480, 480),
+        robot_namespace: str | None = None,
+        uuid: str | None = None,
+    ) -> None:
+        self.camera_name = camera_name
+        self.img_resolution = img_resolution
+        self.robot_namespace = robot_namespace
+        if uuid is None:
+            uuid = f"self_mask_{camera_name}"
+        width, height = img_resolution
+        observation_space = gyms.Box(low=0, high=1, shape=(height, width), dtype=bool)
+        super().__init__(uuid=uuid, observation_space=observation_space)
+
+    def _robot_body_ids(self, env) -> np.ndarray:
+        """Body ids under the robot's namespace, recomputed per scene."""
+        import mujoco
+
+        model = env.current_model
+        ns = self.robot_namespace
+        if ns is None:
+            robot = getattr(env, "current_robot", None)
+            ns = getattr(robot, "robot_namespace", None) or "robot_0/"
+        return np.array(
+            [
+                b
+                for b in range(model.nbody)
+                if (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, b) or "").startswith(ns)
+            ],
+            dtype=np.int32,
+        )
+
+    def get_observation(self, env, task, batch_index: int = 0, *args, **kwargs) -> np.ndarray:
+        seg = env.render_segmentation_frame(self.camera_name)
+        if seg is None:
+            width, height = self.img_resolution
+            return np.zeros((height, width), dtype=bool)
+        seg = np.asarray(seg)
+        # Channel 2 of MolmoSpaces' segmentation frame carries the body id.
+        body_ids = seg[..., 2] if seg.ndim == 3 and seg.shape[-1] >= 3 else seg
+        return np.isin(body_ids, self._robot_body_ids(env))
 
 
 class CameraParameterSensor(Sensor):
