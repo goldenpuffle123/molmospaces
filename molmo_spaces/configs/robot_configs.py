@@ -9,7 +9,7 @@ This module contains:
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from mujoco import MjData
@@ -112,6 +112,16 @@ class BaseRobotConfig(Config):
 
     # Action noise configuration - applied per-robot in Robot.apply_action_noise()
     action_noise_config: ActionNoiseConfig | None = None
+
+    # WHAT MOTION MODEL A PLANNER MUST RESPECT. Declarative, not enforced: the
+    # "holo_joint_planar_position" command mode accepts an absolute (x, y,
+    # theta), which lets a NONHOLONOMIC platform be commanded to strafe -- the
+    # sim will happily execute a motion the real drivetrain cannot. Rather than
+    # add a command mode that rejects lateral commands (and so needs a velocity
+    # controller and a notion of "lateral" per robot), state the constraint here
+    # so an external planner can pick its own motion model and the recorded
+    # episode says which one was correct.
+    base_kinematics: Literal["holonomic", "differential"] = "holonomic"
 
     def model_post_init(self, _context):
         """Ensure action_noise_config is always initialized, even when loading from old configs."""
