@@ -44,6 +44,7 @@ nav:
       - Asset and Grasp Libraries: asset_libraries.md
       - Data Format: data_format.md
       - Data Processing: data_processing.md
+      - External Module Bridge: bridge.md
       - Benchmark Evaluation: evaluation_guide.md
       - Evaluation Lifecycle: evaluation_lifecycle.md
       - Code Structure: code_structure.md
