@@ -1,5 +1,7 @@
+# Note: see [guide](./GUIDE.md) for new changes
+
 <div align="center">
-  <h1>
+  <h1 style="margin-top:100px">
   <img src="docs/images/MolmoSpacesLogo.png" alt="MolmoSpaces Logo" width="800" style="margin-left:'auto' margin-right:'auto' display:'block'"/></br>
   A Large-Scale Open Ecosystem for Robot Manipulation and Navigation
   <div align="center">
