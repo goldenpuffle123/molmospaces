@@ -19,8 +19,10 @@ constraint is the PLANNER's to respect. The residual is that the sim would not
 resist a lateral push, since nothing ever commands one; a genuine wheel-velocity
 controller is the honest upgrade if contact dynamics ever matter here.
 
-THE MODEL IS NOT VENDORED. Point `MLSPACES_STRETCH_DIR` at a directory holding
-`stretch.xml`, or set `robot_dir` on the config.
+THE MODEL IS VENDORED at `molmo_spaces/robots/models/stretch` (MJCF + meshes +
+clearpath's collision spheres/exclusions), so the port resolves with nothing set.
+`MLSPACES_STRETCH_DIR` still overrides it, and `robot_dir` on the config overrides
+both -- that is the seam nbv uses to read its own clearpath checkout in place.
 """
 
 import os
@@ -43,8 +45,13 @@ from molmo_spaces.robots.robot_views.abstract import (
 )
 from molmo_spaces.utils.mj_model_and_data_utils import body_pose
 
+# Resolution order: `robot_dir` on the config > MLSPACES_STRETCH_DIR > vendored.
+# The vendored copy is byte-identical to clearpath's `assets/robots/stretch`,
+# minus `stretch.usd` (Isaac-only) and `stretch.xacro` (the ROS source this MJCF
+# was generated from) -- neither is read by this stack.
+VENDORED_STRETCH_DIR = Path(__file__).parent / "models" / "stretch"
 _ENV_DIR = os.environ.get("MLSPACES_STRETCH_DIR", "")
-STRETCH_DIR = Path(_ENV_DIR) if _ENV_DIR else None
+STRETCH_DIR = Path(_ENV_DIR) if _ENV_DIR else VENDORED_STRETCH_DIR
 
 BASE_JOINTS = ("x_to_world_joint", "y_to_x_joint", "base_to_y_joint")
 BASE_ACTS = tuple(f"{j[:-6]}_act" for j in BASE_JOINTS)  # <name>_joint -> <name>_act
@@ -464,8 +471,8 @@ class StretchConfig(BaseRobotConfig):
     def model_post_init(self, __context) -> None:
         super().model_post_init(__context)
         assert self.robot_dir is not None, (
-            "stretch model directory unknown: set MLSPACES_STRETCH_DIR to a "
-            "directory containing stretch.xml, or pass robot_dir."
+            "stretch model directory unknown: robot_dir was explicitly set to "
+            "None, which defeats both the vendored model and MLSPACES_STRETCH_DIR."
         )
         assert self.get_robot_xml_path().is_file(), (
             f"stretch model not found at {self.get_robot_xml_path()}"

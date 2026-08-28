@@ -31,9 +31,13 @@ CONVENTIONS you get in ``obs`` (see ``bridge/protocol.py`` for the full list):
 * ``{cam}_depth``            metric z-depth [m], float32, NOT ray length
 * ``{cam}_segmentation``     [H, W, 3]; channel 2 is the BODY id
 * ``{cam}_self_mask``        True where the pixel is the robot's own body
-* ``camera_params_{cam}``    ``cam2world_cv`` (OpenCV frame) + ``intrinsic_cv``
+* ``sensor_param_{cam}``     ``cam2world_cv`` (OpenCV frame) + ``intrinsic_cv``
 * ``base_pose_mat``          4x4 base->world, MEASURED
 * ``contacts``               [N, 6] world position + normal, robot vs world
+
+These uuids are EXACT. A name in your ``subscribe`` list that the sim does not
+produce is ignored rather than rejected, so a misspelling costs you a silently
+empty stream that looks like a broken sensor rather than an error.
 """
 
 from __future__ import annotations

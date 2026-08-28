@@ -1,0 +1,453 @@
+<mujoco model="omni_base_dynaarm">
+  <!--
+    Hand-authored MuJoCo model: PAL TIAGo OMNI omnidirectional base +
+    Duatic DynaArm Baracuda12 + Robotiq 2F-85. Mirrors the canonical
+    `ridgeback_dynaarm.xml`, swapping the Ridgeback R100 chassis for the
+    smaller PAL omni base (per user request, 2026-07).
+
+    Base provenance: geometry taken from the official PAL
+    `omni_base_description` URDF. The base_link frame origin sits
+    wheel_radius = 0.0762 m above the floor. The chassis is three stacked
+    COLLISION boxes (URDF full `size`; MuJoCo geom `size` is HALF-extents,
+    so halved here):
+      body      0.705 x 0.480 x 0.167  center z 0.0335
+      mid plate 0.580 x 0.390 x 0.030  center z 0.132
+      top plate 0.717 x 0.497 x 0.0845 center z 0.18925
+    Footprint 0.717 x 0.497 m, total height ~0.31 m, mass ~34 kg. The four
+    mecanum wheels are COSMETIC visual cylinders only (no wheel joints) —
+    the base is driven holonomically by the x/y slide + yaw hinge triple,
+    exactly as ridgeback_dynaarm.xml's planar base.
+
+    Arm: dynaarm_2f85.xml verbatim (classes, chain, wrist armature, gripper),
+    based at the SAME Duatic arm mount as ridgeback_dynaarm.xml
+    (pos [0.23941, 0, 0.499] in base frame, yawed pi -> quat 0 0 0 1). On
+    this shorter base the arm mount sits 0.499 + 0.0762 = 0.5752 m above the
+    floor (vs the Ridgeback's taller deck).
+
+    Actuators: 3 base <position> actuators (holonomic planar drive) + the
+    gripper `fingers_actuator`. The 6 arm actuators are synthesized at load
+    by configure_position_actuators (kp=5000/kv=500), same as the Ridgeback
+    model — do NOT declare them here.
+  -->
+  <compiler angle="radian" meshdir="../dynaarm/meshes" autolimits="true"/>
+
+  <default>
+    <!-- Omni base position actuators — same tuning RATIONALE as
+         ridgeback_base (16x critical-damping baseline, kv = 2*sqrt(kp*m)),
+         scaled from the Ridgeback's 100 kg gains by the mass ratio
+         34/100 = 0.34 for this lighter base. kp/kv/forcerange all just need
+         to hold position under mj_forward; the base is otherwise kinematic. -->
+    <default class="omni_base">
+      <position kp="10880" kv="1216"/>
+      <default class="base_slide">
+        <position forcerange="-2040 2040"/>
+      </default>
+      <default class="base_yaw">
+        <position kp="1088" kv="109" forcerange="-204 204"/>
+      </default>
+    </default>
+    <!-- DynaArm joint classes, verbatim from dynaarm_2f85.xml: armature ONLY
+         on the light wrist DOFs (self-excitation fix, custom-tuned against
+         the synthesized kp=5000/kv=500 arm actuators — see dynaarm_2f85.xml
+         for the full provenance). -->
+    <default class="dynaarm_arm">
+      <joint actuatorfrcrange="-40 40"/>
+      <default class="dynaarm_wrist">
+        <joint armature="0.2"/>
+      </default>
+    </default>
+    <default class="2f85">
+      <mesh scale="0.001 0.001 0.001"/>
+      <general biastype="affine"/>
+      <site type="sphere" rgba="0.9 0.9 0.9 1" size="0.005" group="4"/>
+      <joint axis="1 0 0"/>
+      <default class="driver">
+        <joint range="0 0.8" armature="0.005" damping="0.1" solimplimit="0.95 0.99 0.001" solreflimit="0.005 1"/>
+      </default>
+      <!-- armature on the passively-driven 4-bar links is the MuJoCo #906
+           fix: without joint inertia the equality solver mis-computes the
+           coupling inertia and the gripper destabilizes when the arm moves. -->
+      <default class="follower">
+        <joint range="-0.872664 0.872664" armature="0.001" pos="0 -0.018 0.0065"
+          solimplimit="0.95 0.99 0.001" solreflimit="0.005 1"/>
+      </default>
+      <default class="spring_link">
+        <joint range="-0.29670597283 0.8" armature="0.001" stiffness="0.05"
+          springref="2.62" damping="0.00125"/>
+      </default>
+      <default class="coupler">
+        <joint range="-1.57 0" armature="0.001" solimplimit="0.95 0.99 0.001" solreflimit="0.005 1"/>
+      </default>
+      <default class="2f85/visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="2f85/collision">
+        <geom type="mesh" group="3"/>
+        <default class="pad_box1">
+          <geom mass="0" type="box" pos="0 -0.0026 0.028125" size="0.011 0.004 0.009375" friction="2.0 2.0 0.001" condim="4"
+            solimp="0.95 0.99 0.001" solref="0.004 1" priority="1" rgba="0.55 0.55 0.55 1"/>
+        </default>
+        <default class="pad_box2">
+          <geom mass="0" type="box" pos="0 -0.0026 0.009375" size="0.011 0.004 0.009375" friction="2.0 2.0 0.001" condim="4"
+            solimp="0.95 0.99 0.001" solref="0.004 1" priority="1" rgba="0.45 0.45 0.45 1"/>
+        </default>
+        <!-- 3D-printed L fingertip extensions (tools/make_gripper_extension.py):
+             widen the grasp window from [0, 85] mm to ~[102, 175] mm for the 150 mm
+             softbrick. NEW FLOOR: this gripper can no longer close below ~102 mm
+             (mount plates meet), so <90 mm objects (e.g. grasp_blocks 56 mm cubes)
+             are out of reach for this robot. Geoms live on jointless child bodies
+             of the pads (explicit pad <inertial> would swallow geom masses).
+             Pad-local frame: +y outboard, +z along the finger (world-down when
+             palm-down); pad contact face at y=-0.0066, pad tip at z=0.0375. -->
+        <default class="pad_ext">
+          <geom type="box" group="2" rgba="0.25 0.55 0.85 1"/>
+          <!-- contact face: friction 1.0 is an ESTIMATE (printed face + rubber
+               tape; bare PETG on foam would be ~0.4). priority=1 makes it the
+               governing coefficient over the brick's 0.6. -->
+          <default class="pad_ext_face">
+            <geom friction="1.0 1.0 0.001" condim="4" solimp="0.95 0.99 0.001"
+              solref="0.004 1" priority="1" rgba="0.15 0.4 0.7 1"/>
+          </default>
+        </default>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <!-- PAL omni_base_description VISUAL meshes (raw binary STLs downloaded
+         into this robot's own meshes/ dir; referenced relative to the arm
+         meshdir = ../dynaarm/meshes, hence ../../omni_base_dynaarm/meshes/).
+         Visual-only — the three collision boxes remain the collision model. -->
+    <mesh name="omni_base_link" content_type="model/stl" file="../../omni_base_dynaarm/meshes/base_link.stl"/>
+    <mesh name="omni_wheel" content_type="model/stl" file="../../omni_base_dynaarm/meshes/wheel_link.stl"/>
+    <mesh name="omni_wheel_reflected" content_type="model/stl" file="../../omni_base_dynaarm/meshes/wheel_link_reflected.stl"/>
+
+    <mesh name="base_mesh" content_type="model/obj" file="base_mesh.obj"/>
+    <mesh name="base_collision_mesh" content_type="model/stl" file="base_collision_mesh.stl"/>
+    <mesh name="shoulder_mesh" content_type="model/obj" file="shoulder_mesh.obj"/>
+    <mesh name="shoulder_collision_mesh" content_type="model/stl" file="shoulder_collision_mesh.stl"/>
+    <mesh name="upperarm_mesh" content_type="model/obj" file="upperarm_mesh.obj"/>
+    <mesh name="upperarm_collision_mesh" content_type="model/stl" file="upperarm_collision_mesh.stl"/>
+    <mesh name="elbow_mesh" content_type="model/obj" file="elbow_mesh.obj"/>
+    <mesh name="elbow_collision_mesh" content_type="model/stl" file="elbow_collision_mesh.stl"/>
+    <mesh name="forearm_mesh" content_type="model/obj" file="forearm_mesh.obj"/>
+    <mesh name="forearm_collision_mesh" content_type="model/stl" file="forearm_collision_mesh.stl"/>
+    <mesh name="wrist1_mesh" content_type="model/obj" file="wrist1_mesh.obj"/>
+    <mesh name="wrist1_collision_mesh" content_type="model/stl" file="wrist1_collision_mesh.stl"/>
+    <mesh name="wrist2_mesh" content_type="model/obj" file="wrist2_mesh.obj"/>
+    <mesh name="wrist2_collision_mesh" content_type="model/stl" file="wrist2_collision_mesh.stl"/>
+
+    <!-- 2f85 gripper meshes (Menagerie, prefixed to avoid `base` collision). -->
+    <mesh class="2f85" name="2f85_base_mount" file="../../robotiq_2f85/assets/base_mount.stl"/>
+    <mesh class="2f85" name="2f85_base" file="../../robotiq_2f85/assets/base.stl"/>
+    <mesh class="2f85" name="2f85_driver" file="../../robotiq_2f85/assets/driver.stl"/>
+    <mesh class="2f85" name="2f85_coupler" file="../../robotiq_2f85/assets/coupler.stl"/>
+    <mesh class="2f85" name="2f85_follower" file="../../robotiq_2f85/assets/follower.stl"/>
+    <mesh class="2f85" name="2f85_pad" file="../../robotiq_2f85/assets/pad.stl"/>
+    <mesh class="2f85" name="2f85_silicone_pad" file="../../robotiq_2f85/assets/silicone_pad.stl"/>
+    <mesh class="2f85" name="2f85_spring_link" file="../../robotiq_2f85/assets/spring_link.stl"/>
+
+    <material name="2f85/black" rgba="0.149 0.149 0.149 1"/>
+    <material name="gray" rgba="0.4627 0.4627 0.4627 1"/>
+  </asset>
+
+  <worldbody>
+    <body name="x_prismatic_link">
+      <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+      <joint name="x_to_world_joint" class="base_slide" pos="0 0 0" axis="1 0 0" type="slide" range="-100 100"/>
+      <body name="y_prismatic_link">
+        <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+        <joint name="y_to_x_joint" class="base_slide" pos="0 0 0" axis="0 1 0" type="slide" range="-100 100"/>
+        <body name="base_link" pos="0 0 0.0762">
+          <!-- FLOOR REGISTRATION (the wheel-radius lift): base_link rides
+               wheel_radius = 0.0762 m above the floor plane z=0, exactly as the
+               PAL omni_base URDF defines it (base_footprint at the floor,
+               base_link one wheel radius up). WHY here and not baked into the
+               joint chain: the x/y slides + yaw hinge are planar (z-invariant),
+               so a single rest-height offset on this body lifts the whole robot
+               and every child (boxes, arm mount, arm chain) rides up with it.
+               Without this the lowest chassis box bottomed at z=-0.05 (5 cm
+               THROUGH the floor). After the lift: lowest box bottom +0.0262 m,
+               wheels touch z=0, arm mount at world z 0.5752. The cosmetic wheel
+               geoms below are dropped by 0.0762 in the base frame to compensate
+               (they were authored assuming base_link at the floor). -->
+          <!-- 34 kg omni chassis. Solid-cuboid diaginertia from the 0.717 x
+               0.497 x 0.31 bounding box (I = m/12 * sum of the other two
+               squared extents); CoM at half the base height (z 0.15). The
+               scaled base gains assume this mass. -->
+          <inertial pos="0 0 0.15" mass="34" diaginertia="0.972 1.729 2.157"/>
+          <joint name="base_to_y_joint" class="base_yaw" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159"/>
+          <!-- VISUAL: real PAL base_link mesh at the URDF visual origin (0 0 0,
+               Z-up like MuJoCo). Cosmetic only (group 1, no contacts). -->
+          <geom pos="0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.2 0.2 0.2 1" mesh="omni_base_link"/>
+          <!-- COLLISION model: three stacked chassis boxes (PAL
+               omni_base_description URDF full sizes, halved). Collision-only —
+               the base_link mesh above is what gets drawn. -->
+          <geom size="0.3525 0.240 0.0835" pos="0 0 0.0335" type="box" rgba="0.2 0.2 0.2 1"/>
+          <geom size="0.290 0.195 0.015" pos="0 0 0.132" type="box" rgba="0.2 0.2 0.2 1"/>
+          <geom size="0.3585 0.2485 0.04225" pos="0 0 0.18925" type="box" rgba="0.2 0.2 0.2 1"/>
+          <!-- Four cosmetic mecanum wheels: real PAL wheel meshes (native axle
+               = +z, quat lays it horizontal along y). Reflected mesh on the
+               right side (mecanum wheels are handed). Visual only, no joints —
+               the planar joints do the driving. Base-frame z=0 (dropped from
+               0.0762 by the floor lift above): with base_link at world z=0.0762
+               the wheel centers sit at world z=0.0762, so each wheel's lowest
+               point (radius 0.0762) grazes the floor at z=0. -->
+          <geom pos="0.244 0.2236 0" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.15 0.15 0.15 1" mesh="omni_wheel"/>
+          <geom pos="-0.244 0.2236 0" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.15 0.15 0.15 1" mesh="omni_wheel"/>
+          <geom pos="0.244 -0.2236 0" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.15 0.15 0.15 1" mesh="omni_wheel_reflected"/>
+          <geom pos="-0.244 -0.2236 0" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.15 0.15 0.15 1" mesh="omni_wheel_reflected"/>
+          <!-- DynaArm base at the Duatic arm mount (SAME transform as
+               ridgeback_dynaarm.xml: pos [0.23941, 0, 0.499], yawed pi). -->
+          <geom pos="0.23941 0 0.499" quat="0 0 0 1" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.792157 0.819608 0.933333 1" mesh="base_mesh"/>
+          <geom pos="0.23941 0 0.499" quat="0 0 0 1" type="mesh" rgba="0.792157 0.819608 0.933333 1" mesh="base_collision_mesh"/>
+          <!-- SENSED nav camera (Tier 1). Front-top of the deck (base_link frame
+               [0.35, 0, 0.30] -> world z 0.376 with the floor lift), aimed
+               forward (+x) and 15 deg DOWN so it sees the floor + low obstacles
+               ahead, NOT counters/shelves (that is the EE cam's job, Tier 2).
+               D435-like landscape RGB FOV: fovy=42 deg vertical (69 deg
+               horizontal at ~16:9). MuJoCo camera looks along -z_cam, +y_cam up;
+               xyaxes gives x_cam (image right = robot's -y) and y_cam (up, tilted
+               15 deg forward) so -z_cam = (cos15, 0, -sin15) = forward+down. -->
+          <camera name="base_front_cam" pos="0.35 0 0.30" fovy="42"
+            xyaxes="0 -1 0  0.2588 0 0.9659"/>
+          <!-- ===================== DynaArm chain (dynaarm_2f85.xml) ===================== -->
+          <!-- TIER-1 STOW POSE (fixed for all of Tier 1; it DEFINES the baked
+               arm collision column in collision_spheres.json). Joint angles
+               [rad], joint order shoulder_rotation, shoulder_flexion,
+               elbow_flexion, forearm_rotation, wrist_flexion, wrist_rotation:
+                 [0.0, -1.0, 3.0, 0.0, 1.0, 0.0]
+               WHY these: elbow near its 3.09 rad max fully folds the forearm
+               back; shoulder_flexion -1.0 tucks the upperarm over the base body
+               (the mount sits at +x 0.239, so a NEGATIVE flexion folds the arm
+               BACK over the footprint rather than reaching out front); wrist
+               +1.0 leaves the ee_cam pointing forward-and-down, not into the
+               chassis. Result: a compact column, top ~1.10 m, arm+gripper world
+               AABB x[-0.15, 0.40] y[+-0.12] z[0.48, 1.10] (barely past the
+               0.3585 m front footprint edge). Set these six qpos at load;
+               there is no keyframe (kept out to avoid qpos-length fragility when
+               this robot spec is attached into a house arena). -->
+          <!-- NOTE: the arm is drawn/collided at its qpos, but the planner sees
+               the arm ONLY through the pre-baked spheres, so the qpos MUST be
+               driven to this stow pose before the planner trusts them. -->
+          <body name="shoulder" pos="0.23941 0 0.6095" quat="0 0 0 1">
+            <inertial pos="1.2e-05 0.00048 0.039513" quat="0.70492 0.709283 0.00234996 0.000474112" mass="2.82547" diaginertia="0.0130691 0.0122423 0.00479258"/>
+            <joint name="shoulder_rotation" class="dynaarm_arm" pos="0 0 0" axis="0 0 1" range="-4.31239 4.31239"/>
+            <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="shoulder_mesh"/>
+            <geom type="mesh" mesh="shoulder_collision_mesh"/>
+            <body name="upperarm" pos="0 0 0.047" quat="0.5 0.5 -0.5 0.5">
+              <inertial pos="0.203913 -5.28e-06 -0.00015224" quat="-0.0149021 0.707245 -0.0149286 0.706654" mass="2.1204" diaginertia="0.0507132 0.0506793 0.00155496"/>
+              <joint name="shoulder_flexion" class="dynaarm_arm" pos="0 0 0" axis="0 0 1" range="-1.7208 1.7208"/>
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="upperarm_mesh"/>
+              <geom type="mesh" mesh="upperarm_collision_mesh"/>
+              <body name="elbow" pos="0.4127 0 0">
+                <inertial pos="0.00387586 -0.0780816 -0.000268953" quat="0.409575 0.532175 -0.486089 0.559245" mass="0.824202" diaginertia="0.00114277 0.00108439 0.000863116"/>
+                <joint name="elbow_flexion" class="dynaarm_arm" pos="0 0 0" axis="0 0 1" range="0 3.09159"/>
+                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="elbow_mesh"/>
+                <geom type="mesh" mesh="elbow_collision_mesh"/>
+                <geom size="0.005 0.005 0.005" pos="0.0345 -0.1235 0" type="box" contype="0" conaffinity="0" group="1" density="0"/>
+                <geom size="0.005 0.005 0.005" pos="0.0345 -0.1235 0" type="box"/>
+                <body name="forearm" pos="0.0262 -0.0855 0" quat="0.707107 0 0.707107 0">
+                  <inertial pos="-0.001568 4.6e-05 0.292163" quat="0.991226 0.000827245 0.00412985 0.13211" mass="1.33725" diaginertia="0.0338748 0.0338675 0.00103867"/>
+                  <joint name="forearm_rotation" class="dynaarm_arm" pos="0 0 0" axis="0 0 1" range="-4.71239 4.71239"/>
+                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="forearm_mesh"/>
+                  <geom type="mesh" mesh="forearm_collision_mesh"/>
+                  <body name="wrist_1" pos="0.0295 0 0.4207" quat="0.707107 0 -0.707107 0">
+                    <inertial pos="0.0796841 -5.03362e-05 0.0233124" quat="0.350128 0.613817 0.617751 0.344996" mass="1.15107" diaginertia="0.000886828 0.00085347 0.000591216"/>
+                    <joint name="wrist_flexion" class="dynaarm_wrist" pos="0 0 0" axis="0 0 1" range="-1.8208 1.8208"/>
+                    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="wrist1_mesh"/>
+                    <geom type="mesh" mesh="wrist1_collision_mesh"/>
+                    <geom size="0.005 0.005 0.005" pos="0.032 0 -0.017" type="box" contype="0" conaffinity="0" group="1" density="0"/>
+                    <geom size="0.005 0.005 0.005" pos="0.032 0 -0.017" type="box"/>
+                    <body name="wrist_2" pos="0.117 0 0.0295" quat="0.707107 0 0.707107 0">
+                      <inertial pos="0.000447751 5.45596e-06 0.0035631" quat="-9.58344e-07 0.709291 2.61927e-06 0.704916" mass="0.0488406" diaginertia="2.71207e-05 1.43204e-05 1.37897e-05"/>
+                      <joint name="wrist_rotation" class="dynaarm_wrist" pos="0 0 0" axis="0 0 1" range="-4.71239 4.71239"/>
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="wrist2_mesh"/>
+                      <geom type="mesh" mesh="wrist2_collision_mesh"/>
+
+                      <!-- Flange frame (URDF flange_fix_joint: pos 0 0 0.009,
+                           rpy 0 0 pi/2). Menagerie 2F-85 mounts here, verbatim
+                           from dynaarm_2f85.xml. -->
+                      <body name="flange" pos="0 0 0.009" quat="0.707107 0 0 0.707107">
+                        <!-- Eye-in-hand camera. Aimed along the gripper APPROACH
+                             axis (+z of the flange, toward the pinch point):
+                             camera looks along -z_cam, so a 180 deg roll about x
+                             (quat 0 1 0 0) makes -z_cam = +z_flange. Same D435-like
+                             fovy=42. Shifted -0.25 m along flange x (KEEPING the
+                             orientation) so the gripper is out of the FOV entirely:
+                             at the flange origin the gripper filled 69% of the view;
+                             -x 0.25 drops that to ~1% (probe_ee_cam_offset; -x is the
+                             clear side, +x goes into the arm). The nbv ArmCam IK
+                             targets the ACTUAL camera point (mj_jac), so this mount
+                             offset is handled exactly. -->
+                        <camera name="ee_cam" pos="-0.25 0 0" quat="0 1 0 0" fovy="42"/>
+                        <body name="base_mount" quat="1 0 0 1" childclass="2f85">
+                          <geom class="2f85/visual" mesh="2f85_base_mount" material="2f85/black"/>
+                          <geom class="2f85/collision" mesh="2f85_base_mount"/>
+                          <body name="base" pos="0 0 0.0038" quat="1 0 0 -1">
+                            <inertial mass="0.777441" pos="0 -2.70394e-05 0.0354675" quat="1 -0.00152849 0 0"
+                              diaginertia="0.000260285 0.000225381 0.000152708"/>
+                            <geom class="2f85/visual" mesh="2f85_base" material="2f85/black"/>
+                            <geom class="2f85/collision" mesh="2f85_base"/>
+                            <site name="pinch" pos="0 0 0.145"/>
+                            <body name="right_driver" pos="0 0.0306011 0.054904">
+                              <inertial mass="0.00899563" pos="2.96931e-12 0.0177547 0.00107314"
+                                quat="0.681301 0.732003 0 0" diaginertia="1.72352e-06 1.60906e-06 3.22006e-07"/>
+                              <joint name="right_driver_joint" class="driver"/>
+                              <geom class="2f85/visual" mesh="2f85_driver" material="gray"/>
+                              <geom class="2f85/collision" mesh="2f85_driver"/>
+                              <body name="right_coupler" pos="0 0.0315 -0.0041">
+                                <inertial mass="0.0140974" pos="0 0.00301209 0.0232175"
+                                  quat="0.705636 -0.0455904 0.0455904 0.705636"
+                                  diaginertia="4.16206e-06 3.52216e-06 8.88131e-07"/>
+                                <joint name="right_coupler_joint" class="coupler"/>
+                                <geom class="2f85/visual" mesh="2f85_coupler" material="2f85/black"/>
+                                <geom class="2f85/collision" mesh="2f85_coupler"/>
+                              </body>
+                            </body>
+                            <body name="right_spring_link" pos="0 0.0132 0.0609">
+                              <inertial mass="0.0221642" pos="-8.65005e-09 0.0181624 0.0212658"
+                                quat="0.663403 -0.244737 0.244737 0.663403"
+                                diaginertia="8.96853e-06 6.71733e-06 2.63931e-06"/>
+                              <joint name="right_spring_link_joint" class="spring_link"/>
+                              <geom class="2f85/visual" mesh="2f85_spring_link" material="2f85/black"/>
+                              <geom class="2f85/collision" mesh="2f85_spring_link"/>
+                              <body name="right_follower" pos="0 0.055 0.0375">
+                                <inertial mass="0.0125222" pos="0 -0.011046 0.0124786" quat="1 0.1664 0 0"
+                                  diaginertia="2.67415e-06 2.4559e-06 6.02031e-07"/>
+                                <joint name="right_follower_joint" class="follower"/>
+                                <geom class="2f85/visual" mesh="2f85_follower" material="2f85/black"/>
+                                <geom class="2f85/collision" mesh="2f85_follower"/>
+                                <body name="right_pad" pos="0 -0.0189 0.01352">
+                                  <geom class="pad_box1" name="right_pad1"/>
+                                  <geom class="pad_box2" name="right_pad2"/>
+                                  <inertial mass="0.0035" pos="0 -0.0025 0.0185" quat="0.707107 0 0 0.707107"
+                                    diaginertia="4.73958e-07 3.64583e-07 1.23958e-07"/>
+                                  <geom class="2f85/visual" mesh="2f85_pad"/>
+                                  <body name="right_silicone_pad">
+                                    <geom class="2f85/visual" mesh="2f85_silicone_pad" material="2f85/black"/>
+                                  </body>
+                                  <!-- L fingertip extension (masses = solid PETG; inertia
+                                       inferred from geoms — see pad_ext class comment). -->
+                                  <body name="right_ext">
+                                    <geom class="pad_ext" name="right_ext_mount" size="0.015 0.003 0.021" pos="0 -0.0096 0.021" mass="0.010"/>
+                                    <geom class="pad_ext" name="right_ext_arm" size="0.015 0.0285 0.006" pos="0 0.0159 0.048" mass="0.026"/>
+                                    <geom class="pad_ext_face" name="right_ext_plate" size="0.015 0.003 0.035" pos="0 0.0414 0.089" mass="0.016"/>
+                                  </body>
+                                </body>
+                              </body>
+                            </body>
+                            <body name="left_driver" pos="0 -0.0306011 0.054904" quat="0 0 0 1">
+                              <inertial mass="0.00899563" pos="0 0.0177547 0.00107314" quat="0.681301 0.732003 0 0"
+                                diaginertia="1.72352e-06 1.60906e-06 3.22006e-07"/>
+                              <joint name="left_driver_joint" class="driver"/>
+                              <geom class="2f85/visual" mesh="2f85_driver" material="gray"/>
+                              <geom class="2f85/collision" mesh="2f85_driver"/>
+                              <body name="left_coupler" pos="0 0.0315 -0.0041">
+                                <inertial mass="0.0140974" pos="0 0.00301209 0.0232175"
+                                  quat="0.705636 -0.0455904 0.0455904 0.705636"
+                                  diaginertia="4.16206e-06 3.52216e-06 8.88131e-07"/>
+                                <joint name="left_coupler_joint" class="coupler"/>
+                                <geom class="2f85/visual" mesh="2f85_coupler" material="2f85/black"/>
+                                <geom class="2f85/collision" mesh="2f85_coupler"/>
+                              </body>
+                            </body>
+                            <body name="left_spring_link" pos="0 -0.0132 0.0609" quat="0 0 0 1">
+                              <inertial mass="0.0221642" pos="-8.65005e-09 0.0181624 0.0212658"
+                                quat="0.663403 -0.244737 0.244737 0.663403"
+                                diaginertia="8.96853e-06 6.71733e-06 2.63931e-06"/>
+                              <joint name="left_spring_link_joint" class="spring_link"/>
+                              <geom class="2f85/visual" mesh="2f85_spring_link" material="2f85/black"/>
+                              <geom class="2f85/collision" mesh="2f85_spring_link"/>
+                              <body name="left_follower" pos="0 0.055 0.0375">
+                                <inertial mass="0.0125222" pos="0 -0.011046 0.0124786" quat="1 0.1664 0 0"
+                                  diaginertia="2.67415e-06 2.4559e-06 6.02031e-07"/>
+                                <joint name="left_follower_joint" class="follower"/>
+                                <geom class="2f85/visual" mesh="2f85_follower" material="2f85/black"/>
+                                <geom class="2f85/collision" mesh="2f85_follower"/>
+                                <body name="left_pad" pos="0 -0.0189 0.01352">
+                                  <geom class="pad_box1" name="left_pad1"/>
+                                  <geom class="pad_box2" name="left_pad2"/>
+                                  <inertial mass="0.0035" pos="0 -0.0025 0.0185" quat="1 0 0 1"
+                                    diaginertia="4.73958e-07 3.64583e-07 1.23958e-07"/>
+                                  <geom class="2f85/visual" mesh="2f85_pad"/>
+                                  <body name="left_silicone_pad">
+                                    <geom class="2f85/visual" mesh="2f85_silicone_pad" material="2f85/black"/>
+                                  </body>
+                                  <!-- L fingertip extension — mirrors right_ext (the left chain's
+                                       180° base quats make the same local spec mirror correctly). -->
+                                  <body name="left_ext">
+                                    <geom class="pad_ext" name="left_ext_mount" size="0.015 0.003 0.021" pos="0 -0.0096 0.021" mass="0.010"/>
+                                    <geom class="pad_ext" name="left_ext_arm" size="0.015 0.0285 0.006" pos="0 0.0159 0.048" mass="0.026"/>
+                                    <geom class="pad_ext_face" name="left_ext_plate" size="0.015 0.003 0.035" pos="0 0.0414 0.089" mass="0.016"/>
+                                  </body>
+                                </body>
+                              </body>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="base" body2="left_driver"/>
+    <exclude body1="base" body2="right_driver"/>
+    <exclude body1="base" body2="left_spring_link"/>
+    <exclude body1="base" body2="right_spring_link"/>
+    <exclude body1="right_coupler" body2="right_follower"/>
+    <exclude body1="left_coupler" body2="left_follower"/>
+    <!-- The DynaArm upperarm collision mesh nests 20 mm INSIDE the arm-base
+         mesh (merged into base_link) at the folded rest pose — real parts
+         interleave across the shoulder joint. base_link is the upperarm's
+         GRANDparent (base_link > shoulder > upperarm), so MuJoCo does not
+         auto-exclude the pair, and the phantom contact acts as a friction
+         brake that stalls shoulder_flexion against its 40 Nm actuator clamp
+         (measured: qfrc_constraint -36 Nm vs qfrc_actuator +40, joint
+         immobile). Real base-arm collisions stay guarded by the controller's
+         base/chassis capsules. -->
+    <exclude body1="base_link" body2="upperarm"/>
+  </contact>
+
+  <tendon>
+    <fixed name="split">
+      <joint joint="right_driver_joint" coef="0.5"/>
+      <joint joint="left_driver_joint" coef="0.5"/>
+    </fixed>
+  </tendon>
+
+  <actuator>
+    <position class="base_slide" name="x_to_world_act" joint="x_to_world_joint" ctrlrange="-100 100"/>
+    <position class="base_slide" name="y_to_x_act"     joint="y_to_x_joint"     ctrlrange="-100 100"/>
+    <position class="base_yaw"   name="base_to_y_act"  joint="base_to_y_joint"  ctrlrange="-3.1416 3.1416"/>
+    <general class="2f85" name="fingers_actuator" tendon="split" forcerange="-40 40" ctrlrange="0 255"
+      gainprm="0.3137255 0 0" biasprm="0 -100 -10"/>
+  </actuator>
+
+  <!-- Parallel-jaw conversion of the Menagerie 2F-85, verbatim from
+       dynaarm_2f85.xml: `spring_link = driver` for parallelogram closure,
+       `coupler = 0` pin, `follower = -driver` keeps the pad's WORLD
+       orientation constant. -->
+  <equality>
+    <joint joint1="right_driver_joint" joint2="left_driver_joint" polycoef="0 1 0 0 0" solimp="0.95 0.99 0.001"
+      solref="0.005 1"/>
+    <joint joint1="right_spring_link_joint" joint2="right_driver_joint" polycoef="0 1 0 0 0"
+      solimp="0.0 0.99 0.001" solref="0.005 1"/>
+    <joint joint1="left_spring_link_joint" joint2="left_driver_joint" polycoef="0 1 0 0 0"
+      solimp="0.0 0.99 0.001" solref="0.005 1"/>
+    <joint joint1="right_coupler_joint" polycoef="0 0 0 0 0" solimp="0.95 0.99 0.001" solref="0.005 1"/>
+    <joint joint1="left_coupler_joint" polycoef="0 0 0 0 0" solimp="0.95 0.99 0.001" solref="0.005 1"/>
+    <joint joint1="right_follower_joint" joint2="right_driver_joint" polycoef="0 -1 0 0 0"
+      solimp="0.0 0.99 0.001" solref="0.005 1"/>
+    <joint joint1="left_follower_joint" joint2="left_driver_joint" polycoef="0 -1 0 0 0"
+      solimp="0.0 0.99 0.001" solref="0.005 1"/>
+  </equality>
+</mujoco>

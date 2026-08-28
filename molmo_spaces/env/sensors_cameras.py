@@ -1,3 +1,27 @@
+"""Camera-derived sensors: RGB, depth, segmentation, self-occlusion, parameters.
+
+UUID CONVENTION, one scheme, stated once. An observation dict is keyed by sensor
+uuid, and consumers -- ``BridgePolicy``'s subscription filter, the HDF5 writer's
+``sensor_param_`` grouping, every external client -- match those keys exactly. A
+name nothing produces is not rejected anywhere; it simply yields nothing, which
+looks like a broken sensor.
+
+So the DEFAULT uuid of every sensor here is the name production actually uses::
+
+    {cam}                    RGB
+    {cam}_depth              metric z-depth [m]
+    {cam}_segmentation       [H, W, 3], channel 2 is the body id
+    {cam}_self_mask          the robot's own body
+    sensor_param_{cam}       cam2world_cv + intrinsic_cv
+
+These previously defaulted to a second scheme built from the ``depth_`` and
+``camera_params_`` prefixes, which no caller ever used, because every bundle in
+``env/sensors.py`` and ``env/rby1_sensors.py`` passes ``uuid=`` explicitly. Two
+schemes with only one of them real is how the docs came to advertise uuids that
+never appear in an observation; the defaults now agree with the bundles, so a
+bare construction and a bundled one produce the same key.
+"""
+
 import gymnasium.spaces as gyms
 import numpy as np
 
@@ -17,7 +41,7 @@ class CameraSensor(Sensor):
         self.img_resolution = img_resolution
 
         if uuid is None:
-            uuid = f"camera_{camera_name}"
+            uuid = camera_name
 
         # Define observation space for RGB images
         width, height = img_resolution
@@ -56,7 +80,7 @@ class DepthSensor(Sensor):
         self.img_resolution = img_resolution
 
         if uuid is None:
-            uuid = f"depth_{camera_name}"
+            uuid = f"{camera_name}_depth"
 
         # Define observation space for raw depth (float32 in meters)
         width, height = img_resolution
@@ -93,7 +117,7 @@ class SegmentationSensor(Sensor):
         self.img_resolution = img_resolution
 
         if uuid is None:
-            uuid = f"segmentation_{camera_name}"
+            uuid = f"{camera_name}_segmentation"
 
         # Define observation space for uint8 images with channel dimension
         width, height = img_resolution
@@ -148,7 +172,7 @@ class SelfOcclusionMaskSensor(Sensor):
         self.img_resolution = img_resolution
         self.robot_namespace = robot_namespace
         if uuid is None:
-            uuid = f"self_mask_{camera_name}"
+            uuid = f"{camera_name}_self_mask"
         width, height = img_resolution
         observation_space = gyms.Box(low=0, high=1, shape=(height, width), dtype=bool)
         super().__init__(uuid=uuid, observation_space=observation_space)
@@ -205,7 +229,7 @@ class CameraParameterSensor(Sensor):
         self.camera_name = camera_name
 
         if uuid is None:
-            uuid = f"camera_params_{camera_name}"
+            uuid = f"sensor_param_{camera_name}"
 
         observation_space = gyms.Dict(
             {

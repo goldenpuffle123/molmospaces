@@ -6,12 +6,21 @@ stack driving a nav task has to bypass the observation dict entirely and call
 bundle that closes that, and these tests pin its contract.
 """
 
+import re
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from molmo_spaces.env.abstract_sensors import SensorSuite
 from molmo_spaces.env.sensors import get_perception_sensors
-from molmo_spaces.env.sensors_cameras import SegmentationSensor, SelfOcclusionMaskSensor
+from molmo_spaces.env.sensors_cameras import (
+    CameraParameterSensor,
+    CameraSensor,
+    DepthSensor,
+    SegmentationSensor,
+    SelfOcclusionMaskSensor,
+)
 
 H, W = 48, 64
 
@@ -113,3 +122,129 @@ def test_self_mask_flags_robot_bodies_only():
     assert mask.dtype == bool and mask.shape == (H, W)
     assert mask[:10, :].all(), "robot pixels must be flagged"
     assert not mask[10:, :].any(), "world pixels must not be flagged"
+
+
+# --------------------------------------------------------------------------- #
+# UUID naming, and the docs that describe it
+#
+# The names below are the whole integration surface for an external stack: an
+# observation dict is keyed by uuid, and BridgePolicy._filter() drops anything a
+# subscription does not name. An unrecognised name is IGNORED, not rejected, so a
+# misspelling costs a silently empty stream that looks exactly like a broken
+# sensor -- there is no loud failure anywhere on that path.
+#
+# The tests above already pinned what the CODE produces, and the docs drifted
+# anyway: until 2026-08-28 this function's own docstring, bridge/client.py (the
+# file external stacks copy verbatim), docs/bridge.md and GUIDE.md all told
+# clients to read `camera_params_{cam}`, which no production bundle produces --
+# every caller passes `sensor_param_` explicitly. So the drift guard has to be
+# against the prose, not only the behaviour.
+# --------------------------------------------------------------------------- #
+
+_REPO = Path(__file__).resolve().parents[2]
+
+# What get_perception_sensors actually builds, as templates over the camera name.
+CANONICAL_UUIDS = {
+    "sensor_param_{cam}",
+    "{cam}_depth",
+    "{cam}_segmentation",
+    "{cam}_self_mask",
+}
+
+# Any uuid-shaped token in prose. Catches both affix orders, which is the point:
+# `{cam}_depth` and `depth_{cam}` are equally plausible-looking and only one is real.
+_UUID_TOKEN = re.compile(r"\{cam\}_[a-z_]+|[a-z_]+_\{cam\}")
+
+
+def _documented_uuids(text: str) -> set[str]:
+    """Every uuid-shaped token in prose. No exceptions and no negation handling:
+    a doc that needs to warn about a wrong spelling names the PREFIX
+    (``camera_params_``) rather than a whole uuid, so nothing legitimate is
+    uuid-shaped and the guard needs no heuristic to tell warnings from claims.
+
+    That is deliberate. The first version of this test allowed a bogus token when
+    a negation appeared within N characters before it, and it MISSED the real bug
+    in bridge/client.py -- whose previous line ended "NOT ray length", a negation
+    about something else entirely. Proximity cannot distinguish those; not
+    writing the token can.
+    """
+    flat = " ".join(text.replace("*", "").replace("`", "").split())
+    return {m.group(0) for m in _UUID_TOKEN.finditer(flat)}
+
+
+def test_bare_sensor_defaults_match_what_the_bundles_pass():
+    """ONE uuid scheme, so a bare construction and a bundled one agree.
+
+    These classes used to default to a second, PREFIXED scheme
+    (`camera_params_{cam}`, `depth_{cam}`, ...) that no caller ever selected,
+    because every bundle passes `uuid=` explicitly. Nothing consumed the
+    defaults, so the disagreement was invisible in behaviour and surfaced only in
+    the docs -- which described the defaults while clients had to use the bundle
+    names. Pinning them equal is what stops that from recurring.
+    """
+    cam = "head_camera"
+    assert CameraSensor(camera_name=cam, img_resolution=(W, H)).uuid == cam
+    assert DepthSensor(camera_name=cam, img_resolution=(W, H)).uuid == f"{cam}_depth"
+    assert (
+        SegmentationSensor(camera_name=cam, img_resolution=(W, H)).uuid == f"{cam}_segmentation"
+    )
+    assert (
+        SelfOcclusionMaskSensor(camera_name=cam, img_resolution=(W, H)).uuid == f"{cam}_self_mask"
+    )
+    assert (
+        CameraParameterSensor(camera_name=cam, img_resolution=(W, H)).uuid == f"sensor_param_{cam}"
+    )
+
+    # ... and the bundle agrees with all of them, by construction rather than by
+    # two lists that happen to match.
+    bundled = get_perception_sensors(
+        _ExpCfg((cam,)), depth=True, segmentation=True, self_mask=True
+    )
+    bare = {
+        CameraParameterSensor(camera_name=cam, img_resolution=(W, H)).uuid,
+        DepthSensor(camera_name=cam, img_resolution=(W, H)).uuid,
+        SegmentationSensor(camera_name=cam, img_resolution=(W, H)).uuid,
+        SelfOcclusionMaskSensor(camera_name=cam, img_resolution=(W, H)).uuid,
+    }
+    assert {s.uuid for s in bundled} == bare
+
+
+def test_uuid_templates_are_exactly_these():
+    """Full-set equality, so a NEW stream cannot be added without updating the
+    canonical list the doc tests below check against."""
+    sensors = get_perception_sensors(
+        _ExpCfg(("head_camera",)), depth=True, segmentation=True, self_mask=True
+    )
+    expected = {t.format(cam="head_camera") for t in CANONICAL_UUIDS}
+    assert {s.uuid for s in sensors} == expected
+
+
+def test_code_docstrings_advertise_only_real_uuids():
+    """The docstrings a client reads before writing a subscribe list."""
+    sources = {
+        "get_perception_sensors": get_perception_sensors.__doc__,
+        "bridge/client.py": (_REPO / "molmo_spaces" / "bridge" / "client.py").read_text(),
+        # The module that DEFINES the uuids is guarded too -- it is where a second
+        # scheme would be reintroduced.
+        "env/sensors_cameras.py": (
+            _REPO / "molmo_spaces" / "env" / "sensors_cameras.py"
+        ).read_text(),
+    }
+    for name, text in sources.items():
+        bogus = _documented_uuids(text) - CANONICAL_UUIDS
+        assert not bogus, (
+            f"{name} documents uuid(s) the code does not produce: {sorted(bogus)}. "
+            f"Real ones are {sorted(CANONICAL_UUIDS)}. A client copying this gets a "
+            f"silently empty stream."
+        )
+
+
+def test_markdown_docs_advertise_only_real_uuids():
+    """Same guard for the prose docs. Skipped rather than failed if a file moves:
+    the contract is about what the docs SAY, not about which files exist."""
+    for rel in ("docs/bridge.md", "GUIDE.md"):
+        path = _REPO / rel
+        if not path.is_file():
+            continue
+        bogus = _documented_uuids(path.read_text()) - CANONICAL_UUIDS
+        assert not bogus, f"{rel} documents uuid(s) the code does not produce: {sorted(bogus)}"

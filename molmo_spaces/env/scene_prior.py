@@ -23,7 +23,6 @@ was given, and a reviewer can check it without rerunning anything.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import re
 from collections.abc import Collection
@@ -257,6 +256,7 @@ def export_scene_prior(
     withheld_names: list[str] = []
     withheld_bodies: set[int] = set()
     kept: dict[str, tuple[str, str]] = {}  # body name -> (class_name, natural_name)
+    kept_ids: dict[int, str] = {}  # body id -> body name, for the semantics pass
 
     for obj in om.get_objects_of_type([]):
         name = getattr(obj, "name", "")
@@ -273,20 +273,28 @@ def export_scene_prior(
                 drop = bool(om.has_free_joint(name))
             except Exception:  # noqa: BLE001
                 drop = False
+        # THE OBJECT'S OWN ID, and deliberately not a suppressed `model.body(name)`
+        # lookup. Geometry withholding is driven ENTIRELY by `withheld_bodies`
+        # (see the `surface_points` call below), so a body id that goes missing
+        # here leaves the object's surface points in the prior while
+        # `withheld_categories` still reports it as withheld -- the record would
+        # assert a withholding the data does not honour, which is worse than
+        # either failing loudly or not claiming it. `MlSpacesObject.__init__`
+        # already resolved and cached this id (it reads `body_ipos[object_id]`),
+        # so it cannot fail for an object the manager handed us; if that
+        # invariant ever breaks, this must raise rather than fail open.
+        body_id = int(obj.body_id)
         if drop:
             withheld_names.append(natural)
-            with contextlib.suppress(Exception):
-                withheld_bodies.add(int(model.body(name).id))
+            withheld_bodies.add(body_id)
             continue
         kept[name] = (natural, natural)
+        kept_ids[body_id] = name
 
     # --- semantics -------------------------------------------------------- #
     objects: list[SemanticObject] = []
     if semantics != "none":
-        ids = {}
-        for nm in kept:
-            with contextlib.suppress(Exception):
-                ids[int(model.body(nm).id)] = nm
+        ids = kept_ids
         clouds = _object_points(model, data, ids, min_corner_r) if object_points else {}
         for bid, nm in ids.items():
             try:

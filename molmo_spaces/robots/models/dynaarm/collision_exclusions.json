@@ -1,0 +1,134 @@
+{
+ "robot": "dynaarm",
+ "provenance": {
+  "seed": 0,
+  "n_samples": 8000,
+  "held_out": 4000,
+  "d_min": 0.05,
+  "band": 0.02,
+  "always_frac": 0.98,
+  "limits": "TOML [constraints] lbx/ubx",
+  "held_fixed": []
+ },
+ "groups": {
+  "elbow_flexion": [
+   "elbow",
+   "elbow_camera_mount"
+  ],
+  "forearm_rotation": [
+   "forearm"
+  ],
+  "shoulder_flexion": [
+   "upperarm"
+  ],
+  "shoulder_rotation": [
+   "shoulder"
+  ],
+  "universe": [
+   "base"
+  ],
+  "wrist_flexion": [
+   "wrist_1",
+   "wrist_1_camera_mount"
+  ],
+  "wrist_rotation": [
+   "flange",
+   "wrist_2"
+  ]
+ },
+ "kept_pairs": [
+  [
+   "universe",
+   "wrist_flexion",
+   -0.1348,
+   0.043
+  ],
+  [
+   "forearm_rotation",
+   "universe",
+   -0.1204,
+   0.034
+  ],
+  [
+   "shoulder_rotation",
+   "wrist_flexion",
+   -0.1125,
+   0.034
+  ],
+  [
+   "universe",
+   "wrist_rotation",
+   -0.1092,
+   0.029
+  ],
+  [
+   "shoulder_rotation",
+   "wrist_rotation",
+   -0.1015,
+   0.016
+  ],
+  [
+   "shoulder_flexion",
+   "wrist_flexion",
+   -0.0759,
+   0.01
+  ],
+  [
+   "shoulder_flexion",
+   "wrist_rotation",
+   -0.0746,
+   0.005
+  ],
+  [
+   "forearm_rotation",
+   "shoulder_rotation",
+   -0.0742,
+   0.029
+  ],
+  [
+   "forearm_rotation",
+   "shoulder_flexion",
+   -0.0251,
+   0.305
+  ],
+  [
+   "forearm_rotation",
+   "wrist_rotation",
+   0.0235,
+   0.0
+  ],
+  [
+   "shoulder_flexion",
+   "universe",
+   0.066,
+   0.0
+  ]
+ ],
+ "excluded_never": [
+  [
+   "elbow_flexion",
+   "wrist_rotation",
+   0.3219,
+   0.0
+  ],
+  [
+   "elbow_flexion",
+   "wrist_flexion",
+   0.3015,
+   0.0
+  ],
+  [
+   "elbow_flexion",
+   "shoulder_rotation",
+   0.2418,
+   0.0
+  ],
+  [
+   "elbow_flexion",
+   "universe",
+   0.2263,
+   0.0
+  ]
+ ],
+ "excluded_always_overlap": []
+}

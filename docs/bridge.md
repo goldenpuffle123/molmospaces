@@ -136,7 +136,7 @@ and `close` always carries a fresh one.
 | `{cam}_depth` | metric **z-depth** in metres, not ray length |
 | `{cam}_segmentation` | `[H, W, 3]`; **channel 2 is the body id** |
 | `{cam}_self_mask` | true where the pixel is the robot's own body — drop, do not map |
-| `camera_params_{cam}["cam2world_cv"]` | camera→world in the **OpenCV** frame |
+| `sensor_param_{cam}["cam2world_cv"]` | camera→world in the **OpenCV** frame |
 | `base_pose_mat` | 4×4 base→world (distinct from the nav task's 7D `robot_base_pose` sensor) |
 
 ## Bandwidth

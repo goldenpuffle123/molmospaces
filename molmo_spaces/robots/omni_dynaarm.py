@@ -5,13 +5,17 @@ next-best-view stack: a holonomic base that can strafe, an arm whose camera can
 be driven into cavities a fixed head never sees, and a second fixed deck camera
 so the nav task's success test always has a `head_camera` to read.
 
-Like the Stretch port, the MJCF is missing the base sites and the three planar
-actuators, and they are added at attach time through HoloBaseKit rather than by
-editing the model. The arm's actuators are synthesized for the same reason (the
-model deliberately declares none).
+Like the Stretch port, the MJCF is missing the two base sites, and they are added
+at attach time through HoloBaseKit rather than by editing the model. UNLIKE the
+Stretch it DOES ship its own three planar actuators, so only their force limit is
+overridden; what is synthesized here is the ARM's six, which the model
+deliberately declares none of.
 
-THE MODEL IS NOT VENDORED. Point `MLSPACES_OMNI_DYNAARM_DIR` at a directory
-holding `omni_base_dynaarm.xml`, or set `robot_dir` on the config.
+THE MODEL IS VENDORED at `molmo_spaces/robots/models/omni_base_dynaarm`. The MJCF
+reads meshes from two SIBLING directories (`../dynaarm/meshes` via `meshdir` and
+`../../robotiq_2f85/assets`), so that layout is mirrored under `models/` and the
+XML is byte-identical to clearpath's -- a partial copy silently loses the arm or
+the gripper. `MLSPACES_OMNI_DYNAARM_DIR` overrides, `robot_dir` overrides both.
 
 STATUS: ported and import-checked, NOT exercised in an episode here.
 """
@@ -37,8 +41,11 @@ from molmo_spaces.robots.robot_views.abstract import (
 )
 from molmo_spaces.utils.mj_model_and_data_utils import body_pose
 
+# Resolution order: `robot_dir` on the config > MLSPACES_OMNI_DYNAARM_DIR >
+# vendored. See the module docstring on why the sibling mesh dirs come along.
+VENDORED_OMNI_DYNAARM_DIR = Path(__file__).parent / "models" / "omni_base_dynaarm"
 _ENV_DIR = os.environ.get("MLSPACES_OMNI_DYNAARM_DIR", "")
-OMNI_DYNAARM_DIR = Path(_ENV_DIR) if _ENV_DIR else None
+OMNI_DYNAARM_DIR = Path(_ENV_DIR) if _ENV_DIR else VENDORED_OMNI_DYNAARM_DIR
 
 BASE_JOINTS = ("x_to_world_joint", "y_to_x_joint", "base_to_y_joint")
 BASE_ACTS = ("x_to_world_act", "y_to_x_act", "base_to_y_act")
@@ -298,7 +305,8 @@ class OmniDynaArmRobot(Robot):
 
 class OmniDynaArmConfig(BaseRobotConfig):
     """Robot config. `robot_dir` is the BaseRobotConfig seam for a robot that is
-    not a prepackaged MlSpaces asset, so nothing is installed into their tree."""
+    vendored in-tree rather than installed through `molmospaces_resources`, so
+    nothing is written into the managed asset cache."""
 
     robot_cls: type = OmniDynaArmRobot
     robot_factory: object = OmniDynaArmRobot
@@ -323,9 +331,9 @@ class OmniDynaArmConfig(BaseRobotConfig):
     def model_post_init(self, __context) -> None:
         super().model_post_init(__context)
         assert self.robot_dir is not None, (
-            "omni_base_dynaarm model directory unknown: set "
-            "MLSPACES_OMNI_DYNAARM_DIR to a directory containing "
-            "omni_base_dynaarm.xml, or pass robot_dir."
+            "omni_base_dynaarm model directory unknown: robot_dir was explicitly "
+            "set to None, which defeats both the vendored model and "
+            "MLSPACES_OMNI_DYNAARM_DIR."
         )
         assert self.get_robot_xml_path().is_file(), (
             f"omni_base_dynaarm model not found at {self.get_robot_xml_path()}"

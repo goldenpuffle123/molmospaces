@@ -38,18 +38,24 @@ def _model():
 
 
 class _Obj:
-    def __init__(self, name):
+    """Mirrors MlSpacesObject: it carries its OWN body id, resolved when the
+    object manager built it. Geometry withholding keys off that id, so a stub
+    without one would not exercise the path that matters."""
+
+    def __init__(self, name, body_id):
         self.name = name
+        self.body_id = body_id
 
 
 class _OM:
     """Stub ObjectManager: names are their own categories; "mug" is movable."""
 
-    def __init__(self, names):
+    def __init__(self, names, model):
         self._names = list(names)
+        self._model = model
 
     def get_objects_of_type(self, _types):
-        return [_Obj(n) for n in self._names]
+        return [_Obj(n, int(self._model.body(n).id)) for n in self._names]
 
     def fallback_expression(self, name):
         return name
@@ -75,7 +81,7 @@ class _Env:
 
 def _env():
     m, d = _model()
-    return _Env(m, d, _OM(["counter", "mug", "shelf"]))
+    return _Env(m, d, _OM(["counter", "mug", "shelf"], m))
 
 
 def test_normalize_category_is_spacing_and_case_insensitive():
@@ -190,3 +196,50 @@ def test_as_point_clouds_shape():
 @pytest.mark.parametrize("kind", ["none", "surface_points"])
 def test_geometry_kinds_are_accepted(kind):
     export_scene_prior(_env(), geometry=kind)
+
+
+def test_everything_reported_withheld_has_a_body_id_to_withhold_it_by():
+    """The record and the mechanism must agree.
+
+    Geometry withholding is driven ENTIRELY by `withheld_bodies`
+    (`surface_points(skip_bodies=...)`), while `withheld_categories` is what a
+    reviewer reads. Previously the body id was resolved under
+    `contextlib.suppress(Exception)`, so a failed lookup produced a bundle that
+    REPORTED an object as withheld while its surface points were still in the
+    geometry -- a target-shaped hole the record swore was not there. An empty
+    `withheld_bodies` beside a non-empty `withheld_categories` is exactly that
+    state, and it must be unreachable.
+    """
+    prior = export_scene_prior(
+        _env(),
+        geometry="surface_points",
+        semantics="all",
+        withhold_categories=["mug"],
+        withhold_movable=False,
+    )
+    assert prior.withheld_categories, "the fixture must actually withhold something"
+    assert prior.withheld_bodies, (
+        "withheld_categories is non-empty but withheld_bodies is empty: geometry "
+        "cannot honour a withholding it has no body id for"
+    )
+    assert len(prior.withheld_bodies) >= len(prior.withheld_categories)
+
+
+def test_withheld_object_is_absent_from_geometry_by_body_id():
+    """The end-to-end property, checked against the bundle's actual contents
+    rather than against the requested withhold set -- a category the scene has no
+    instance of is legitimately absent, so comparing to the request fails open."""
+    env = _env()
+    prior = export_scene_prior(
+        env,
+        geometry="surface_points",
+        semantics="all",
+        withhold_categories=["mug"],
+        withhold_movable=False,
+        voxel=0.05,
+    )
+    pts = prior.geometry.points
+    assert len(pts), "the control half of this test needs a non-empty prior"
+    # The mug is a 0.5 m cube at (5, 5); nothing kept is within 1 m of it.
+    d = np.linalg.norm(pts[:, :2] - np.asarray(MUG_XY), axis=1)
+    assert d.min() > 1.0, f"withheld object leaked into geometry ({int((d <= 1.0).sum())} points)"

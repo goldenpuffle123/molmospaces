@@ -1060,13 +1060,18 @@ def get_perception_sensors(
     Unlike the per-task bundles this is composable and robot-agnostic: it bakes
     in no robot-name checks and adds only what you ask for.
 
-    FRAME AND UNIT CONVENTIONS, stated because consumers cannot guess them:
+    UUIDS AND CONVENTIONS, stated because consumers cannot guess them. The names
+    are exact: an observation dict is keyed by uuid, and a consumer asking for a
+    name this bundle does not produce gets nothing back -- which looks exactly
+    like a broken sensor. ``test_perception_sensors.py`` pins both the names and
+    this docstring against the code.
 
-    * ``camera_params_{cam}["cam2world_cv"]`` is camera->world in the OpenCV
-      frame (x right, y down, z forward), matching ``intrinsic_cv``.
-    * ``depth_{cam}`` is METRIC z-depth in metres (perpendicular distance to the
+    * ``sensor_param_{cam}`` carries ``cam2world_cv``, camera->world in the
+      OpenCV frame (x right, y down, z forward), matching ``intrinsic_cv``.
+    * ``{cam}_depth`` is METRIC z-depth in metres (perpendicular distance to the
       image plane), NOT ray length, as float32.
-    * ``self_mask_{cam}`` is True where the pixel shows the robot's own body.
+    * ``{cam}_segmentation`` is ``[H, W, 3]``; CHANNEL 2 is the body id.
+    * ``{cam}_self_mask`` is True where the pixel shows the robot's own body.
       Those pixels carry no world information and must be dropped, not treated
       as free or occupied.
 
